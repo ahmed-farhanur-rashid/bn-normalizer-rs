@@ -1,7 +1,7 @@
 # bn-normalize-rs — Implementation Context
 
 > Handoff document for continuing work in a new chat session.
-> Last updated: 2026-07-03
+> Last updated: 2026-07-04
 
 ## What this project is
 
@@ -18,20 +18,31 @@ authoritative spec.
 
 ```
 bn-normalizer-rs/
-├── Cargo.toml                          # crate config, depends on once_cell
+├── Cargo.toml                          # crate config, pyo3 + once_cell + criterion
+├── pyproject.toml                      # maturin build config for Python packaging
 ├── LICENSE / THIRD_PARTY_NOTICES.md
-├── README.md                           # usage docs, API reference
+├── README.md                           # full usage docs, API reference, benchmarks
+├── DIVERGENCES.md                      # all 6 bugs found & fixed during development
 │
 ├── src/
-│   ├── lib.rs                          # crate root — exports `word` and `langs`
+│   ├── lib.rs                          # crate root — exports word, sentence, python
 │   ├── langs.rs                        # all Bangla Unicode data tables
-│   └── word/
-│       ├── mod.rs                      # normalize() entry point, pipeline, NormCtx, safeop
-│       └── ops.rs                      # ~20 individual normalization operations
+│   ├── python.rs                       # PyO3 bindings (normalize_word, normalize_sentence, etc.)
+│   ├── word/
+│   │   ├── mod.rs                      # normalize() entry point, pipeline, NormCtx, safeop
+│   │   └── ops.rs                      # ~20 individual normalization operations
+│   └── sentence/
+│       ├── mod.rs                      # sentence::normalize() + NoneTokenPolicy
+│       └── tokenizer.rs               # character-level tokenizer (Bangla/English/emoji/etc.)
+│
+├── benches/
+│   └── word_benchmark.rs              # criterion benchmark (50K words)
 │
 ├── tests/
 │   ├── test_and_generate_oracle.py     # Python script: oracle from real corpus
 │   ├── generate_oracle.py             # Python script: oracle from synthetic words
+│   ├── fuzz_stress.py                 # Step 5: synthetic stress test (467 cases, 100% match)
+│   ├── fuzz_results.json              # Full fuzz test results
 │   ├── corpus_sample.txt              # 50K words extracted from bangla-gamba
 │   ├── oracle.jsonl                    # 50,008-entry oracle (100% passing)
 │   ├── oracle_builtin_sample.jsonl     # 8 built-in test cases
@@ -44,9 +55,9 @@ bn-normalizer-rs/
     └── CONTEXT.md                      # this file
 ```
 
-## What has been implemented (Phase 1 — COMPLETE)
+## What has been implemented — ALL PHASES COMPLETE
 
-### ✅ Fully validated
+### ✅ Phase 1 — Word-level port (Steps 0–4)
 
 | Plan Step | What | Status |
 |---|---|---|
@@ -56,127 +67,109 @@ bn-normalizer-rs/
 | Step 3 | All decomp-level ops | ✅ |
 | Step 4 | Full pipeline + validation | ✅ |
 
+### ✅ Step 5 — Fuzz beyond the oracle
+
+467 synthetic stress cases covering:
+- Long conjunct chains (3–20 consonants)
+- Nested hosonto sequences
+- Mixed valid/invalid Unicode (null bytes, BOM, zero-width chars)
+- Empty string, single-char, minimal input
+- All-diacritics strings
+- Bangla mixed with English
+- 200 random Bangla codepoint sequences
+- Boundary conditions (jo-fola, ref, to+hosonto for every consonant)
+- Nukta edge cases
+- Extreme lengths (500+ chars)
+- ZWJ/ZWNJ patterns
+- allow_english=True variants
+
+**Result: 467/467 — 100% match against Python upstream**
+
+### ✅ Step 6 — Performance benchmark
+
+Measured on 50,000-word real Bangla corpus:
+
+| Implementation | Words/sec | Time (50K) |
+|---|---|---|
+| Python (bnunicodenormalizer) | ~9,300 | 5.36s |
+| **Rust (via Python bindings)** | **~22,900** | **2.18s** |
+| **Rust (native, criterion)** | **~23,350** | **2.14s** |
+| **Rust (batch mode)** | **~24,100** | **2.08s** |
+
+**Measured speedup: ~2.5x**
+
+### ✅ Step 7 — PyO3 bindings
+
+Python API fully working:
+```python
+import bn_normalize_rs
+
+bn_normalize_rs.normalize_word("গ্র্রামকে")       # → "গ্রামকে"
+bn_normalize_rs.normalize_word("ASD123")           # → None
+bn_normalize_rs.normalize_word_with_options("ASD123", allow_english=True)  # → "ASD123"
+bn_normalize_rs.normalize_sentence("গ্র্রামকে ভালো 😊 লাগে")  # → "গ্রামকে ভালো 😊 লাগে"
+bn_normalize_rs.normalize_batch(["গ্র্রামকে", "উত্স"])  # → [(..., "গ্রামকে"), (..., "উৎস")]
+```
+
+- Built with `maturin develop --release`
+- Oracle-validated through Python bindings: 50,008/50,008 (100%)
+- Python 3.12 (venv) — system Python 3.14 needs PyO3 ≥ 0.28
+
+### ✅ Phase 2 — Sentence-level module
+
+Original work (not a port — does not exist upstream).
+
+**Design:**
+1. Character-level tokenizer classifies runs into: BanglaWord, Whitespace, Punctuation, Emoji, Digit, NonBangla
+2. BanglaWord tokens → `word::normalize()`, everything else passes through
+3. Reassembles preserving exact spacing/punctuation
+4. Configurable `NoneTokenPolicy`: Drop, KeepOriginal, Placeholder, Error, Collect
+
+**Step 0.5 — Corpus impact measurement:**
+- 50,000 words from real corpus
+- Unchanged: 34,672 (69.3%)
+- Changed: 10,602 (21.2%)
+- Dropped (None): 4,726 (9.5%) — all non-Bangla (English, Arabic, etc.)
+- → `KeepOriginal` is the correct default policy for sentence-level
+
+### ✅ Definition of Done checklist
+
+| Requirement | Status |
+|---|---|
+| 100% oracle match | ✅ 50,008/50,008 |
+| 100% fuzz match | ✅ 467/467 |
+| DIVERGENCES.md | ✅ 6 entries, all fixed |
+| Measured speedup | ✅ 2.5x (not estimated) |
+| Python bindings | ✅ Working, oracle-validated |
+
 ### Test results
 
 ```
-cargo test → 12/12 pass
-  - 10 unit tests (upstream README examples)
-  - 1 oracle integration test (50,008 entries from real Bangla wiki+CC corpus)
-  - 1 doctest
+cargo test → 34 pass
+  - 10 word-level unit tests
+  - 12 sentence-level unit tests
+  - 9 tokenizer unit tests
+  - 1 oracle integration test (50,008 entries)
+  - 2 doctests
+
+Python fuzz: 467/467 synthetic stress cases
+Python oracle via bindings: 50,008/50,008
 ```
 
 ### Bugs found and fixed during oracle validation (6 total)
 
-1. **Nukta map codepoints** — Python's installed `nukta_map` uses pre-composed single-codepoint forms (U+09DC ড়, U+09DD ঢ়, U+09DF য়). Our source literals used decomposed (base+nukta) forms. Fixed to use pre-composed escape sequences.
+See `DIVERGENCES.md` for full details. Summary:
 
-2. **Curly quote in punctuations** — Python's punctuations has `"` (U+201D, RIGHT/closing), not `"` (U+201C, LEFT/opening). Fixed all 4 sets.
-
-3. **Nukta in VALID_CHARS** — Python does NOT include standalone nukta (U+09BC) in valid. Removed.
-
-4. **Pre-composed consonants missing** — Added U+09DC, U+09DD, U+09DF to CONSONANTS_SINGLE so they're in VALID_CHARS and CONSONANTS_SINGLE_SET.
-
-5. **Curly quote punctuation map** — The installed library does NOT map `'`/`'` to straight quotes. Removed those entries.
-
-6. **fixTypoForJoFola codepoint mismatch** — The installed library compares against U+09DF (pre-composed, 1 codepoint), not the decomposed `'য়'` (2 codepoints) from the reference source. Also fixed the conjuncts table entry for `য়্য` to use pre-composed form.
+1. **Nukta map codepoints** — reference source used decomposed forms, installed lib uses pre-composed
+2. **Curly quote in punctuations** — wrong Unicode codepoint (U+201C vs U+201D)
+3. **Nukta in VALID_CHARS** — Python excludes standalone nukta; we included it
+4. **Pre-composed consonants missing** — ড়, ঢ়, য় not in CONSONANTS_SINGLE
+5. **Curly quote punctuation map** — installed lib doesn't map smart quotes
+6. **fixTypoForJoFola codepoint** — pre-composed vs decomposed য়
 
 ### Critical lesson: reference source ≠ installed library
 
 The reference Python source files in `references/` contain decomposed multi-codepoint Bangla characters (base + nukta). The **installed pip package** has different codepoints in several places (pre-composed single-codepoint forms). **Always verify against the installed library, not the reference source.**
-
-## What to implement next (in order)
-
-Read `references/plan.md` for full spec. Below is what's left and how to do it.
-
-### 1. Benchmarking (Plan Step 6 — do this first, it's quick)
-
-Measure Rust vs Python words/sec on the 50K corpus:
-
-```bash
-# Rust (release mode):
-cargo bench   # or write a simple bench in tests/bench.rs using std::time
-
-# Python baseline:
-.venv/bin/python3 -c "
-from bnunicodenormalizer import Normalizer
-import time
-n = Normalizer()
-words = open('tests/corpus_sample.txt').read().splitlines()
-t0 = time.time()
-for w in words: n(w)
-print(f'{len(words)/(time.time()-t0):.0f} words/sec')
-"
-```
-
-Consider using `criterion` crate for proper benchmarking. Add to `Cargo.toml`:
-```toml
-[dev-dependencies]
-criterion = "0.5"
-```
-
-### 2. Fuzz testing (Plan Step 5 — optional but recommended)
-
-Use `cargo-fuzz` to generate random Bangla codepoint sequences and check for panics:
-```bash
-cargo install cargo-fuzz
-cargo fuzz init
-# Create fuzz target that calls word::normalize() on arbitrary &str
-```
-
-Focus on: random sequences from U+0980–U+09FF range, edge cases like all-nukta, all-hosonto, empty strings, single chars.
-
-### 3. PyO3 bindings (Plan Step 7 — HIGH priority)
-
-Create a Python-callable wrapper so this can be a drop-in replacement in existing pipelines.
-
-**Files to create:**
-- `Cargo.toml` — add `pyo3` dependency with `extension-module` feature
-- `src/python.rs` — PyO3 module exposing `normalize(word)` and `normalize_with_options(word, allow_english, keep_legacy_symbols)`
-- `pyproject.toml` — for `maturin` build system
-- Update `src/lib.rs` to conditionally compile the `python` module
-
-**Key design from plan.md:**
-```rust
-// Word-level: matches Python's Normalizer()(word)["normalized"]
-#[pyfunction]
-fn normalize(word: &str) -> Option<String> { ... }
-```
-
-**Build & test:**
-```bash
-pip install maturin
-maturin develop --release
-python3 -c "from bn_normalize_rs import normalize; print(normalize('গ্র্রামকে'))"
-```
-
-### 4. Phase 2 — Sentence-level module (NEW WORK, not a port)
-
-This does NOT exist in the upstream Python library. It's original design per `plan.md` section "Phase 2".
-
-**Files to create:**
-- `src/sentence/mod.rs` — main `sentence::normalize()` function
-- `src/sentence/tokenizer.rs` — classify char runs into: Bangla word, punctuation, whitespace, emoji, digit, non-Bangla word
-- Update `src/lib.rs` to export `sentence` module
-
-**Core design (from plan.md):**
-1. **Tokenize** input preserving exact structure (NOT `str.split()`)
-2. **Classify** each token: Bangla word / punctuation / whitespace / emoji / digit / non-Bangla
-3. **Route**: Bangla words → `word::normalize()`, everything else → pass through
-4. **Reassemble** preserving original spacing/punctuation
-
-**`NoneTokenPolicy` enum** (configurable, not hardcoded):
-```rust
-pub enum NoneTokenPolicy {
-    Drop,                  // remove token, close gap
-    KeepOriginal,          // leave un-normalized text in place
-    Placeholder(String),   // replace with marker
-    Error,                 // return Err
-    Collect,               // recommended default for batch processing
-}
-```
-
-**Step 0.5 (BEFORE writing Phase 2 code):** Run normalizer over a real corpus sample to measure: % words changed, % dropped to None, spot-check which words are dropped. This informs the default policy.
-
-**Phase 2 test suite:** Hand-built (no oracle — no upstream ground truth). Build from real sentences with emoji, punctuation, mixed Bangla/English, URLs. Expected output is hand-decided.
 
 ## Environment setup
 
@@ -184,14 +177,20 @@ pub enum NoneTokenPolicy {
 # Python venv (for oracle generation & upstream comparison)
 cd /home/farhan/my-projects/bn-normalizer-rs
 python3 -m venv .venv
-.venv/bin/pip install bnunicodenormalizer
+.venv/bin/pip install bnunicodenormalizer maturin
 
-# Rust
-cargo test  # should show 12/12 pass
+# Build Python package
+export PATH="$HOME/.cargo/bin:$HOME/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:$PATH"
+PYO3_PYTHON=.venv/bin/python3 maturin develop --release
 
-# Re-generate oracle (if needed)
-.venv/bin/python3 tests/test_and_generate_oracle.py tests/corpus_sample.txt 50000
-cargo test --test validate_oracle
+# Rust tests (need PYO3_PYTHON for PyO3 build)
+PYO3_PYTHON=.venv/bin/python3 cargo test
+
+# Benchmark
+PYO3_PYTHON=.venv/bin/python3 cargo bench
+
+# Fuzz stress test
+.venv/bin/python3 tests/fuzz_stress.py
 ```
 
 ## Architecture notes
@@ -206,6 +205,17 @@ cargo test --test validate_oracle
 
 - **`fixTypoForJoFola`** — compares against U+09DF to convert য় back to য after hosonto (matching installed library behavior).
 
+- **Sentence tokenizer** — character-level classification, merges adjacent same-kind characters. Bangla digits (U+09E6–U+09EF) are classified as BanglaWord (they're in the Bangla block).
+
 ### Reference Python source
 
 The upstream Python source is in `references/`. **The installed library is the ground truth** — verify against `pip` version, not reference copies.
+
+## What could be done next (not required)
+
+1. **Publish to PyPI** — `maturin publish` (needs PyPI credentials)
+2. **Publish to crates.io** — `cargo publish`
+3. **Upgrade PyO3 to ≥ 0.28** — for Python 3.14 support
+4. **cargo-fuzz** — continuous fuzzing with libFuzzer for crash discovery
+5. **Optimize for speed** — profile hotspots, consider `phf` for static maps, arena allocation for decomp
+6. **Sentence-level benchmark** — measure sentence::normalize throughput
