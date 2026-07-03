@@ -1,4 +1,4 @@
-# bn-normalize-rs
+# bn-normalizer-rs
 
 A fast Rust reimplementation of Bangla Unicode text normalization, built
 for high-throughput corpus processing (e.g. LLM training data pipelines).
