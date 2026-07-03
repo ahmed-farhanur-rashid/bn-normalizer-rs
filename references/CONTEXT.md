@@ -83,14 +83,116 @@ cargo test → 12/12 pass
 
 The reference Python source files in `references/` contain decomposed multi-codepoint Bangla characters (base + nukta). The **installed pip package** has different codepoints in several places (pre-composed single-codepoint forms). **Always verify against the installed library, not the reference source.**
 
-## What needs to be done next
+## What to implement next (in order)
 
-| Step | What | Priority |
-|---|---|---|
-| Step 5 | Fuzz testing (synthetic stress cases) | Medium |
-| Step 6 | Performance benchmark (Rust vs Python words/sec) | Medium |
-| Step 7 | PyO3 bindings → `pip install`-able Python package | High |
-| Phase 2 | Sentence-level module (tokenize, NoneTokenPolicy) | Medium |
+Read `references/plan.md` for full spec. Below is what's left and how to do it.
+
+### 1. Benchmarking (Plan Step 6 — do this first, it's quick)
+
+Measure Rust vs Python words/sec on the 50K corpus:
+
+```bash
+# Rust (release mode):
+cargo bench   # or write a simple bench in tests/bench.rs using std::time
+
+# Python baseline:
+.venv/bin/python3 -c "
+from bnunicodenormalizer import Normalizer
+import time
+n = Normalizer()
+words = open('tests/corpus_sample.txt').read().splitlines()
+t0 = time.time()
+for w in words: n(w)
+print(f'{len(words)/(time.time()-t0):.0f} words/sec')
+"
+```
+
+Consider using `criterion` crate for proper benchmarking. Add to `Cargo.toml`:
+```toml
+[dev-dependencies]
+criterion = "0.5"
+```
+
+### 2. Fuzz testing (Plan Step 5 — optional but recommended)
+
+Use `cargo-fuzz` to generate random Bangla codepoint sequences and check for panics:
+```bash
+cargo install cargo-fuzz
+cargo fuzz init
+# Create fuzz target that calls word::normalize() on arbitrary &str
+```
+
+Focus on: random sequences from U+0980–U+09FF range, edge cases like all-nukta, all-hosonto, empty strings, single chars.
+
+### 3. PyO3 bindings (Plan Step 7 — HIGH priority)
+
+Create a Python-callable wrapper so this can be a drop-in replacement in existing pipelines.
+
+**Files to create:**
+- `Cargo.toml` — add `pyo3` dependency with `extension-module` feature
+- `src/python.rs` — PyO3 module exposing `normalize(word)` and `normalize_with_options(word, allow_english, keep_legacy_symbols)`
+- `pyproject.toml` — for `maturin` build system
+- Update `src/lib.rs` to conditionally compile the `python` module
+
+**Key design from plan.md:**
+```rust
+// Word-level: matches Python's Normalizer()(word)["normalized"]
+#[pyfunction]
+fn normalize(word: &str) -> Option<String> { ... }
+```
+
+**Build & test:**
+```bash
+pip install maturin
+maturin develop --release
+python3 -c "from bn_normalize_rs import normalize; print(normalize('গ্র্রামকে'))"
+```
+
+### 4. Phase 2 — Sentence-level module (NEW WORK, not a port)
+
+This does NOT exist in the upstream Python library. It's original design per `plan.md` section "Phase 2".
+
+**Files to create:**
+- `src/sentence/mod.rs` — main `sentence::normalize()` function
+- `src/sentence/tokenizer.rs` — classify char runs into: Bangla word, punctuation, whitespace, emoji, digit, non-Bangla word
+- Update `src/lib.rs` to export `sentence` module
+
+**Core design (from plan.md):**
+1. **Tokenize** input preserving exact structure (NOT `str.split()`)
+2. **Classify** each token: Bangla word / punctuation / whitespace / emoji / digit / non-Bangla
+3. **Route**: Bangla words → `word::normalize()`, everything else → pass through
+4. **Reassemble** preserving original spacing/punctuation
+
+**`NoneTokenPolicy` enum** (configurable, not hardcoded):
+```rust
+pub enum NoneTokenPolicy {
+    Drop,                  // remove token, close gap
+    KeepOriginal,          // leave un-normalized text in place
+    Placeholder(String),   // replace with marker
+    Error,                 // return Err
+    Collect,               // recommended default for batch processing
+}
+```
+
+**Step 0.5 (BEFORE writing Phase 2 code):** Run normalizer over a real corpus sample to measure: % words changed, % dropped to None, spot-check which words are dropped. This informs the default policy.
+
+**Phase 2 test suite:** Hand-built (no oracle — no upstream ground truth). Build from real sentences with emoji, punctuation, mixed Bangla/English, URLs. Expected output is hand-decided.
+
+## Environment setup
+
+```bash
+# Python venv (for oracle generation & upstream comparison)
+cd /home/farhan/my-projects/bn-normalizer-rs
+python3 -m venv .venv
+.venv/bin/pip install bnunicodenormalizer
+
+# Rust
+cargo test  # should show 12/12 pass
+
+# Re-generate oracle (if needed)
+.venv/bin/python3 tests/test_and_generate_oracle.py tests/corpus_sample.txt 50000
+cargo test --test validate_oracle
+```
 
 ## Architecture notes
 
