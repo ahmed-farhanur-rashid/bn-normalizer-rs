@@ -1,10 +1,152 @@
-/target
-Cargo.lock
+
+# ============================================================
+#   bn-normalizer-rs — Git Ignore Rules
+#   Rust library + Python reference scripts
+# ============================================================
+
+
+# ─────────────────────────────────────────
+#  Rust / Cargo
+# ─────────────────────────────────────────
+/target/
+Cargo.lock          # library crates should not commit lock files
+**/*.rs.bk          # rustfmt backup files
+*.pdb               # Windows debug symbols
+
+
+# ─────────────────────────────────────────
+#  Python virtual environments
+# ─────────────────────────────────────────
+.venv/
+.venv
+venv/
+venv
+env/
+env
+ENV/
+.env/
+__pyenv__/
+
+# ─────────────────────────────────────────
+#  Python bytecode & caches
+# ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ─────────────────────────────────────────
+#  Jupyter / IPython
+# ─────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ─────────────────────────────────────────
+#  Environment & secrets
+# ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.toml
+
+
+# ─────────────────────────────────────────
+#  Editor artefacts
+# ─────────────────────────────────────────
+
+# Vim / Neovim
 *.swp
 *.swo
 *~
+.netrwhist
+Session.vim
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# JetBrains (IntelliJ, CLion, PyCharm …)
+.idea/
+*.iml
+*.iws
+
+# Emacs
+\#*\#
+.\#*
+*.elc
+auto-save-list
+tramp
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Helix
+.helix/
+
+
+# ─────────────────────────────────────────
+#  OS artefacts
+# ─────────────────────────────────────────
+
+# macOS
 .DS_Store
-.venv
-.venv/
-venv
-venv/
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+.directory
+.Trash-*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+
+# ─────────────────────────────────────────
+#  Test & benchmark outputs
+# ─────────────────────────────────────────
+/tests/output/
+/tests/__pycache__/
+criterion/          # Criterion.rs benchmark results
+flamegraph.svg
+perf.data
+perf.data.old
+
+
+# ─────────────────────────────────────────
+#  Documentation build artefacts
+# ─────────────────────────────────────────
+/doc/
+/docs/_build/
+
+
+# ─────────────────────────────────────────
+#  Misc
+# ─────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+*.orig
+.cache/
