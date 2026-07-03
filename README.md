@@ -17,7 +17,33 @@ is correct but slow (pure Python, word-at-a-time), which becomes a
 bottleneck at large-corpus scale. This project provides a
 behaviorally-identical, much faster implementation in Rust.
 
+## Performance
+
+Measured on a 50,000-word real Bangla corpus (wiki + Common Crawl):
+
+| Implementation | Words/sec | Time (50K words) |
+|---|---|---|
+| Python (bnunicodenormalizer) | ~9,300 | 5.36s |
+| **Rust (via Python bindings)** | **~22,900** | **2.18s** |
+| **Rust (native)** | **~23,350** | **2.14s** |
+
+**Speedup: ~2.5x** through Python bindings, ~2.5x native Rust.
+
+> Benchmarked with criterion (Rust) and time.perf_counter (Python).
+> All measurements are 3-trial averages on the same machine.
+
 ## Installation
+
+### As a Python package (recommended)
+
+```bash
+# Build and install from source
+pip install maturin
+maturin develop --release
+
+# Or install a pre-built wheel (when published)
+pip install bn-normalize-rs
+```
 
 ### As a Rust library
 
@@ -45,6 +71,38 @@ cargo build --release
 
 ## Usage
 
+### Python API
+
+```python
+import bn_normalize_rs
+
+# Word-level normalization
+result = bn_normalize_rs.normalize_word("গ্র্রামকে")   # → "গ্রামকে"
+result = bn_normalize_rs.normalize_word("ASD123")       # → None
+
+# With options
+result = bn_normalize_rs.normalize_word_with_options(
+    "ASD123", allow_english=True
+)  # → "ASD123"
+
+# Sentence-level normalization (preserves spacing, punctuation, emoji)
+result = bn_normalize_rs.normalize_sentence("গ্র্রামকে ভালো লাগে")
+# → "গ্রামকে ভালো লাগে"
+
+result = bn_normalize_rs.normalize_sentence("আমি Python 😊 শিখছি")
+# → "আমি Python 😊 শিখছি"
+
+# Batch processing
+results = bn_normalize_rs.normalize_batch(["গ্র্রামকে", "উত্স", "ASD123"])
+# → [("গ্র্রামকে", "গ্রামকে"), ("উত্স", "উৎস"), ("ASD123", None)]
+
+# Sentence with configurable None policy
+result = bn_normalize_rs.normalize_sentence(
+    "গ্র্রামকে ভালো লাগে",
+    none_policy="drop"          # or "keep_original", "error", "collect"
+)
+```
+
 ### Rust API
 
 ```rust
@@ -65,6 +123,13 @@ let opts = word::NormalizeOptions {
 };
 let result = word::normalize_with_options("ASD123", &opts);
 assert_eq!(result, Some("ASD123".to_string()));
+
+// Sentence-level normalization
+use bn_normalize_rs::sentence;
+
+let opts = sentence::SentenceNormalizeOptions::default();
+let result = sentence::normalize("গ্র্রামকে ভালো লাগে", &opts).unwrap();
+assert_eq!(result.text, "গ্রামকে ভালো লাগে");
 
 // With default legacy maps (maps rare legacy symbols to common equivalents)
 let opts = word::NormalizeOptions {
@@ -92,6 +157,18 @@ assert_eq!(result, Some("৭".to_string()));
 | 3 | `false` | `None` | All legacy symbols removed |
 | 4 | `false` | `Some(map)` | Mapped symbols changed, rest removed |
 
+### Sentence-level `NoneTokenPolicy`
+
+When normalizing sentences, Bangla words that normalize to `None` are
+handled according to the configured policy:
+
+| Policy | Behavior |
+|---|---|
+| `"keep_original"` (default) | Leave original un-normalized text in place |
+| `"drop"` | Remove the token, closing the gap |
+| `"error"` | Raise `ValueError` on the first None word |
+| `"collect"` | Return `(text, failed_tokens)` tuple for batch inspection |
+
 ## What it normalizes
 
 This library handles the following classes of Bangla Unicode issues:
@@ -118,6 +195,10 @@ This project reimplements the word-level normalization rules from
 (Bengali.AI, MIT licensed) in Rust for performance. The word-level
 core is validated to match the upstream Python library's output exactly
 — it is a faithful, oracle-tested port, not a reinterpretation.
+
+The **sentence-level module** is original work — it does not exist
+upstream (see upstream issue #13). It provides intelligent tokenization
+that preserves spacing, punctuation, emoji, and non-Bangla content.
 
 See `THIRD_PARTY_NOTICES.md` for full attribution and license text.
 
@@ -153,10 +234,17 @@ src/
 ├── lib.rs              — crate root, public API
 ├── langs.rs            — Bangla Unicode data tables (vowels, consonants,
 │                         diacritics, conjuncts, normalization maps)
-└── word/
-    ├── mod.rs          — word-level normalize() entry point + pipeline
-    └── ops.rs          — individual normalization operations
+├── python.rs           — PyO3 bindings for Python interop
+├── word/
+│   ├── mod.rs          — word-level normalize() entry point + pipeline
+│   └── ops.rs          — individual normalization operations
+└── sentence/
+    ├── mod.rs          — sentence-level normalize() + NoneTokenPolicy
+    └── tokenizer.rs    — character-level tokenizer (Bangla/English/emoji/etc.)
+
+benches/                — criterion benchmarks
 references/             — upstream Python source snapshot (for oracle generation)
+tests/                  — oracle validation (50,008 words, 100% match)
 THIRD_PARTY_NOTICES.md  — upstream license + attribution
 LICENSE                 — this project's MIT license
 ```
@@ -164,7 +252,11 @@ LICENSE                 — this project's MIT license
 ## Running tests
 
 ```bash
+# All tests (unit + oracle integration + doctests)
 cargo test
+
+# Benchmark
+cargo bench
 ```
 
 ## License

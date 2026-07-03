@@ -22,6 +22,19 @@
 //! };
 //! assert_eq!(word::normalize_with_options("ASD123", &opts), Some("ASD123".to_string()));
 //! ```
+//!
+//! ## Sentence-level normalization
+//!
+//! ```rust
+//! use bn_normalize_rs::sentence;
+//!
+//! let opts = sentence::SentenceNormalizeOptions::default();
+//! let result = sentence::normalize("গ্র্রামকে ভালো লাগে", &opts).unwrap();
+//! assert_eq!(result.text, "গ্রামকে ভালো লাগে");
+//! ```
 
 pub mod langs;
 pub mod word;
+pub mod sentence;
+
+mod python;
