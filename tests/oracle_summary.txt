@@ -1,0 +1,42 @@
+ORACLE GENERATION SUMMARY
+======================================================================
+Total words processed:   50008
+Unchanged:                34672 (69.33%)
+Changed by normalization: 10609 (21.21%)
+Dropped to None:          4727 (9.45%)
+
+Operations triggered (across all changed words):
+  BrokenNukta: 6983
+  InvalidUnicode: 2806
+  base_bangla_compose: 423
+  PunctuationReplacement: 364
+  FixDiacritics: 197
+  ComplexRootNormalization: 141
+  InvalidConnector: 140
+  ToAndHosontoNormalize: 118
+  NormalizeConjunctsDiacritics: 73
+  AssameseReplacement: 51
+  BrokenDiacritics: 8
+  VowelDiacriticAfterVowel: 7
+
+Sample of dropped words (up to 20):
+  ৄ
+  rational
+  Adelaide
+  Gendarmeria
+  Aptenodytes
+  Hz
+  Mahābharata
+  ptilon
+  שפינוזה
+  cognition
+  Kos
+  Mathematischen
+  Cavallero
+  Bombarnac
+  mississippiensis
+  physique
+  civilization
+  cabinet
+  Karim
+  brac
