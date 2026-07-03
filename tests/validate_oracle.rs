@@ -10,14 +10,14 @@ use std::path::Path;
 #[test]
 fn validate_against_oracle() {
     // Try oracle.jsonl first (large corpus run), fall back to builtin sample
-    let oracle_path = if Path::new("tests/oracle.jsonl").exists() {
-        "tests/oracle.jsonl"
-    } else if Path::new("tests/oracle_builtin_sample.jsonl").exists() {
-        "tests/oracle_builtin_sample.jsonl"
+    let oracle_path = if Path::new("tests/data/oracle.jsonl").exists() {
+        "tests/data/oracle.jsonl"
+    } else if Path::new("tests/data/oracle_builtin.jsonl").exists() {
+        "tests/data/oracle_builtin.jsonl"
     } else {
         panic!(
             "No oracle file found. Run:\n  \
-             cd tests && python3 test_and_generate_oracle.py [corpus.txt] [sample_size]"
+             cd tests/scripts && python3 generate_oracle.py [corpus.txt] [sample_size]"
         );
     };
 
