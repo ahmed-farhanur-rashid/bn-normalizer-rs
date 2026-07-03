@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This project (`bn-normalize-rs`) is a Rust reimplementation of the
+This project (`bn-normalizer-rs`) is a Rust reimplementation of the
 word-level Bangla Unicode normalization rules originally implemented in
 [bnunicodenormalizer](https://github.com/mnansary/bnUnicodeNormalizer)
 by Bengali.AI, in association with the OCR Team, APSIS Solutions
