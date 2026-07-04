@@ -54,7 +54,7 @@ fn normalize_word_with_options(
 /// Args:
 ///     text: The input text to normalize.
 ///     none_policy: What to do when a Bangla word normalizes to None.
-///         One of: "drop", "keep_original", "error", "collect".
+///         One of: "drop", "keep_original", "error", "collect", "drop_and_collect".
 ///         Default: "keep_original".
 ///     allow_english: If True, English characters are treated as valid in word normalization.
 ///
@@ -74,9 +74,10 @@ fn normalize_sentence(
         "keep_original" => sentence::NoneTokenPolicy::KeepOriginal,
         "error" => sentence::NoneTokenPolicy::Error,
         "collect" => sentence::NoneTokenPolicy::Collect,
+        "drop_and_collect" => sentence::NoneTokenPolicy::DropAndCollect,
         other => {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "Invalid none_policy '{}'. Must be one of: drop, keep_original, error, collect",
+                "Invalid none_policy '{}'. Must be one of: drop, keep_original, error, collect, drop_and_collect",
                 other
             )));
         }

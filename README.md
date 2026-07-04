@@ -218,6 +218,7 @@ handled according to the configured policy:
 | `"drop"` | Remove the token, closing the gap |
 | `"error"` | Raise `ValueError` on the first None word |
 | `"collect"` | Return `(text, failed_tokens)` tuple for batch inspection |
+| `"drop_and_collect"` | Remove the token from the text, but return it in the failed_tokens tuple for inspection |
 
 ---
 

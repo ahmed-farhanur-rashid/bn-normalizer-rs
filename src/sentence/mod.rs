@@ -25,6 +25,8 @@ pub enum NoneTokenPolicy {
     /// Normalize what's possible; collect failed tokens alongside the result.
     /// Recommended default for corpus-scale batch processing.
     Collect,
+    /// Drop the token entirely, but collect it in the failed_tokens list.
+    DropAndCollect,
 }
 
 /// Options for sentence-level normalization.
@@ -118,6 +120,10 @@ pub fn normalize(
                         NoneTokenPolicy::Collect => {
                             failed_tokens.push((i, token.text.clone()));
                             result_parts.push(token.text.clone());
+                        }
+                        NoneTokenPolicy::DropAndCollect => {
+                            failed_tokens.push((i, token.text.clone()));
+                            // Don't add anything to result_parts — token is dropped
                         }
                     },
                 }
