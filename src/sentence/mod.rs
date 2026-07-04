@@ -1,7 +1,7 @@
 //! Sentence-level Bangla Unicode normalization.
 //!
 //! This module does NOT exist in the upstream Python library — it is original
-//! work designed per the plan in `references/plan.md` (Phase 2).
+//! work, not a port.
 //!
 //! It tokenizes input text preserving exact structure, routes Bangla words
 //! through `word::normalize`, and passes everything else through unchanged.

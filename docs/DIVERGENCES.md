@@ -13,7 +13,7 @@
 
 ## Critical lesson
 
-> The reference Python source files in `references/` contain decomposed
+> The reference Python source files in `bnUnicodeNormalizer-src/` contain decomposed
 > multi-codepoint Bangla characters (base + nukta). The **installed pip
 > package** has different codepoints in several places (pre-composed
 > single-codepoint forms). **Always verify against the installed library,

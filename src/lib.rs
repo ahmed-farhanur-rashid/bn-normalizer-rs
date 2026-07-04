@@ -1,8 +1,13 @@
 //! # bn-normalize-rs
 //!
-//! Fast Bangla Unicode text normalization — a faithful Rust port of
+//! Fast Bangla Unicode text normalization.
+//!
+//! **Author:** Ahmed Farhanur Rashid  
+//! **License:** MIT  
+//!
+//! A faithful Rust port of
 //! [bnunicodenormalizer](https://github.com/mnansary/bnUnicodeNormalizer)
-//! by Bengali.AI.
+//! by Bengali.AI, with an additional sentence-level normalization module.
 //!
 //! ## Quick start
 //!

@@ -5,7 +5,7 @@
 mod ops;
 
 use crate::langs;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Options for word normalization, matching the Python constructor args.
 #[derive(Debug, Clone)]
@@ -44,43 +44,22 @@ pub fn normalize(word: &str) -> Option<String> {
 
 /// Normalize a single Bangla word with custom options.
 pub fn normalize_with_options(word: &str, opts: &NormalizeOptions) -> Option<String> {
-    // Build valid/roots sets based on options
-    let mut valid: HashSet<char> = langs::VALID_CHARS.clone();
-    let mut roots: HashSet<String> = langs::COMPLEX_ROOTS.clone();
-
-    if opts.allow_english {
-        valid.extend(langs::ENGLISH_VALID.iter());
-        for c in langs::ENGLISH_VALID.iter() {
-            roots.insert(c.to_string());
-        }
-    }
-    if opts.keep_legacy_symbols {
-        valid.extend(langs::LEGACY_SYMBOLS.iter());
-        for c in langs::LEGACY_SYMBOLS.iter() {
-            roots.insert(c.to_string());
-        }
-    }
-
     let mut ctx = NormCtx {
         word: word.to_string(),
         decomp: Vec::new(),
-        valid,
-        roots,
-        legacy_maps: opts.legacy_maps.clone(),
+        allow_english: opts.allow_english,
+        keep_legacy: opts.keep_legacy_symbols,
+        legacy_maps: opts.legacy_maps.as_ref(),
     };
 
     // ── Word-level ops ──
-    // LegacySymbols
     ops::map_legacy_symbols(&mut ctx);
-    // BrokenDiacritics
     ops::fix_broken_diacritics(&mut ctx);
-    // AssameseReplacement
     ops::replace_assamese(&mut ctx);
-    // PunctuationReplacement
     ops::replace_punctuations(&mut ctx);
 
     // ── Decompose ──
-    ctx.decomp = ctx.word.chars().map(|c| Some(c.to_string())).collect();
+    ctx.decomp = ctx.word.chars().map(Some).collect();
 
     // ── Decomp-level ops (each via safeop) ──
     safeop(&mut ctx, ops::fix_broken_nukta);
@@ -125,64 +104,76 @@ pub fn normalize_with_options(word: &str, opts: &NormalizeOptions) -> Option<Str
     // Join
     let result: String = ctx.decomp.iter()
         .filter_map(|x| x.as_ref())
-        .map(|s| s.as_str())
-        .collect();
+        .collect::<String>();
 
     if result.is_empty() { None } else { Some(result) }
 }
 
 /// Internal context for the normalizer (replaces Python `self`).
-pub(crate) struct NormCtx {
+/// Uses references to static sets instead of cloning per call.
+pub(crate) struct NormCtx<'a> {
     pub word: String,
-    pub decomp: Vec<Option<String>>,
-    pub valid: HashSet<char>,
-    pub roots: HashSet<String>,
-    pub legacy_maps: Option<HashMap<char, String>>,
+    /// Decomposition buffer — `Option<char>` for the common case.
+    /// Multi-char strings from ops are handled by `rejoin_resplit` normalizing
+    /// everything back to single chars after each op.
+    pub decomp: Vec<Option<char>>,
+    pub allow_english: bool,
+    pub keep_legacy: bool,
+    pub legacy_maps: Option<&'a HashMap<char, String>>,
 }
 
-impl NormCtx {
+impl<'a> NormCtx<'a> {
     pub fn decomp_empty(&self) -> bool {
         self.decomp.iter().all(|x| x.is_none())
     }
 
-    /// Get the string at decomp[idx], or None.
-    pub fn get(&self, idx: usize) -> Option<&str> {
-        self.decomp.get(idx).and_then(|x| x.as_deref())
+    /// Check if a character is valid given current options.
+    #[inline]
+    pub fn is_valid(&self, c: char) -> bool {
+        langs::VALID_CHARS.contains(&c)
+            || (self.allow_english && langs::ENGLISH_VALID.contains(&c))
+            || (self.keep_legacy && langs::LEGACY_SYMBOLS_SET.contains(&c))
     }
 
-    /// Get the single char at decomp[idx] if it's a single-char string.
+    /// Check if a string is a valid root given current options.
+    #[inline]
+    pub fn is_valid_root(&self, s: &str) -> bool {
+        langs::COMPLEX_ROOTS.contains(s)
+            || (self.allow_english && s.len() == 1 && {
+                let c = s.chars().next().unwrap();
+                langs::ENGLISH_VALID.contains(&c)
+            })
+            || (self.keep_legacy && s.len() == 1 && {
+                let c = s.chars().next().unwrap();
+                langs::LEGACY_SYMBOLS_SET.contains(&c)
+            })
+    }
+
+    /// Get the char at decomp[idx], or None.
+    #[inline]
     pub fn get_char(&self, idx: usize) -> Option<char> {
-        self.get(idx).and_then(|s| {
-            let mut chars = s.chars();
-            let c = chars.next()?;
-            if chars.next().is_none() { Some(c) } else { None }
-        })
+        self.decomp.get(idx).and_then(|x| *x)
     }
 }
 
 /// The `safeop` wrapper: filter None, rejoin+resplit, run op, filter+rejoin+resplit again.
 fn safeop(ctx: &mut NormCtx, op: impl FnOnce(&mut NormCtx)) {
-    // Pre: filter None, rejoin, resplit
     rejoin_resplit(ctx);
-    // Run op
     op(ctx);
-    // Post: filter None, rejoin, resplit
     rejoin_resplit(ctx);
 }
 
+/// Filter None entries — the new rejoin_resplit is just a retain since decomp is Vec<Option<char>>.
+/// The original Python does: join chars → re-split into chars. With Option<char>, this is
+/// equivalent to just filtering out Nones (no multi-char strings to re-split).
 fn rejoin_resplit(ctx: &mut NormCtx) {
-    let joined: String = ctx.decomp.iter()
-        .filter_map(|x| x.as_ref())
-        .map(|s| s.as_str())
-        .collect();
-    ctx.decomp = joined.chars().map(|c| Some(c.to_string())).collect();
+    ctx.decomp.retain(|x| x.is_some());
 }
 
 /// `baseCompose` — runs a fixed sub-pipeline.
 fn base_compose(ctx: &mut NormCtx) {
     safeop_inner(ctx, ops::clean_invalid_unicodes);
     safeop_inner(ctx, |c| ops::clean_invalid_connector_bangla(c));
-    // cleanDiacritics = 4 sub-steps
     safeop_inner(ctx, ops::clean_vowel_diacritics);
     safeop_inner(ctx, ops::clean_consonant_diacritics_bangla);
     safeop_inner(ctx, ops::fix_diacritic_order);

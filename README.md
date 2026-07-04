@@ -23,21 +23,22 @@ Measured on a 50,000-word real Bangla corpus (wiki + Common Crawl):
 
 | Implementation | Words/sec | Time (50K words) |
 |---|---|---|
-| Python (bnunicodenormalizer) | ~9,300 | 5.36s |
-| **Rust (via Python bindings)** | **~22,900** | **2.18s** |
-| **Rust (native)** | **~23,350** | **2.14s** |
+| Python (bnunicodenormalizer) | ~9,300 | 5.39s |
+| **Rust (via Python bindings)** | **~240,000** | **0.21s** |
 
-**Speedup: ~2.5x** through Python bindings, ~2.5x native Rust.
+**Speedup: ~26x** through Python bindings.
 
-> Benchmarked with criterion (Rust) and time.perf_counter (Python).
+> Benchmarked with `time.perf_counter` (Python) against the optimized Rust build.
 > All measurements are 3-trial averages on the same machine.
+
+---
 
 ## Installation
 
 ### As a Python package (recommended)
 
 ```bash
-# Build and install from source
+# From source (requires Rust toolchain + maturin)
 pip install maturin
 maturin develop --release
 
@@ -69,38 +70,71 @@ cd bn-normalizer-rs
 cargo build --release
 ```
 
+---
+
 ## Usage
 
 ### Python API
 
+**Basic word normalization:**
+
 ```python
-import bn_normalize_rs
+from bn_normalize_rs import normalize_word
+from pprint import pprint
 
-# Word-level normalization
-result = bn_normalize_rs.normalize_word("গ্র্রামকে")   # → "গ্রামকে"
-result = bn_normalize_rs.normalize_word("ASD123")       # → None
+# Normalize a single word
+word = 'াটোবাকো'
+result = normalize_word(word)
+print(f"Non-norm: {word}; Norm: {result}")
+# → Non-norm: াটোবাকো; Norm: টোবাকো
+```
 
-# With options
-result = bn_normalize_rs.normalize_word_with_options(
-    "ASD123", allow_english=True
-)  # → "ASD123"
+**Returns:**
+- `str` — the normalized word
+- `None` — if the word normalizes to empty (all characters invalid/dropped)
 
-# Sentence-level normalization (preserves spacing, punctuation, emoji)
-result = bn_normalize_rs.normalize_sentence("গ্র্রামকে ভালো লাগে")
+```python
+# Invalid / non-Bangla input returns None
+normalize_word("ASD123")         # → None
+normalize_word("ৄ")              # → None (isolated diacritic)
+```
+
+**Allowing English text:**
+
+```python
+from bn_normalize_rs import normalize_word, normalize_word_with_options
+
+# Without English (default)
+normalize_word("ASD123")                                  # → None
+
+# With English
+normalize_word_with_options("ASD123", allow_english=True)  # → "ASD123"
+```
+
+**Sentence-level normalization (preserves spacing, punctuation, emoji):**
+
+```python
+from bn_normalize_rs import normalize_sentence
+
+# Mixed Bangla/non-Bangla text
+normalize_sentence("গ্র্রামকে ভালো লাগে")
 # → "গ্রামকে ভালো লাগে"
 
-result = bn_normalize_rs.normalize_sentence("আমি Python 😊 শিখছি")
+normalize_sentence("আমি Python 😊 শিখছি")
 # → "আমি Python 😊 শিখছি"
 
-# Batch processing
-results = bn_normalize_rs.normalize_batch(["গ্র্রামকে", "উত্স", "ASD123"])
-# → [("গ্র্রামকে", "গ্রামকে"), ("উত্স", "উৎস"), ("ASD123", None)]
+# Configurable None token policy
+normalize_sentence("গ্র্রামকে ভালো লাগে", none_policy="drop")
+# Policies: "keep_original" (default), "drop", "error", "collect"
+```
 
-# Sentence with configurable None policy
-result = bn_normalize_rs.normalize_sentence(
-    "গ্র্রামকে ভালো লাগে",
-    none_policy="drop"          # or "keep_original", "error", "collect"
-)
+**Batch processing:**
+
+```python
+from bn_normalize_rs import normalize_batch
+
+results = normalize_batch(["গ্র্রামকে", "উত্স", "ASD123"])
+# → [("গ্র্রামকে", "গ্রামকে"), ("উত্স", "উৎস"), ("ASD123", None)]
 ```
 
 ### Rust API
@@ -140,15 +174,31 @@ let result = word::normalize_with_options("ঀ", &opts);
 assert_eq!(result, Some("৭".to_string()));
 ```
 
-### Configuration Options
+---
+
+## Initialization Options
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `allow_english` | `bool` | `false` | Allow English letters, numbers, and punctuation |
 | `keep_legacy_symbols` | `bool` | `false` | Treat legacy symbols as valid Unicode |
-| `legacy_maps` | `Option<HashMap<char, String>>` | `None` | Custom mapping of legacy symbols to replacements |
+| `legacy_maps` | `dict` / `Option<HashMap>` | `None` | Custom mapping of legacy symbols to replacements |
 
-**Legacy symbol handling follows the same rules as upstream:**
+**Legacy symbols:**
+
+| Symbol | Name |
+|---|---|
+| `৺` | Isshar |
+| `৻` | Ganda |
+| `ঀ` | Anji (not '৭') |
+| `ঌ` | Li |
+| `ৡ` | Dirgho Li |
+| `ঽ` | Avagraha |
+| `ৠ` | Vocalic Rr (not 'ঋ') |
+| `৲` | Rupi |
+| `৴` – `৹` | Currency numerators/denominators |
+
+**Legacy handling cases (`keep_legacy_symbols` × `legacy_maps`):**
 
 | Case | `keep_legacy_symbols` | `legacy_maps` | Behavior |
 |---|---|---|---|
@@ -169,24 +219,130 @@ handled according to the configured policy:
 | `"error"` | Raise `ValueError` on the first None word |
 | `"collect"` | Return `(text, failed_tokens)` tuple for batch inspection |
 
-## What it normalizes
+---
 
-This library handles the following classes of Bangla Unicode issues:
+## Normalization Problem Examples
 
-- **Broken diacritics** — e.g. `আরো` (ে+া) → `আরো` (ো)
-- **Nukta normalization** — e.g. `য` + `়` → `য়`
-- **Invalid hosonto (connector)** — e.g. `দুই্টি` → `দুইটি`
-- **To+hosonto conversion** — e.g. `উত্স` → `উৎস`
-- **Duplicate diacritics** — e.g. `যুুদ্ধ` → `যুদ্ধ`
-- **Vowel diacritics after vowels** — e.g. `উুলু` → `উলু`
-- **Repeated folas** — e.g. `গ্র্রামকে` → `গ্রামকে`
-- **Complex root normalization** — validates and fixes conjunct formations
-- **Assamese character replacement** — ৰ→র, ৱ→ব
-- **Punctuation normalization** — curly quotes, dashes, etc.
+**In all examples, (a) is the non-normalized form and (b) is the normalized form.**
 
-> **Note:** The normalization is based on how Bangla text is used in
+### Broken diacritics
+```
+# Example 1:
+(a) 'আরো' == (b) 'আরো' → False
+    (a) breaks as: ['আ', 'র', 'ে', 'া']
+    (b) breaks as: ['আ', 'র', 'ো']
+
+# Example 2:
+(a) 'পৌঁছে' == (b) 'পৌঁছে' → False
+    (a) breaks as: ['প', 'ে', 'ৗ', 'ঁ', 'ছ', 'ে']
+    (b) breaks as: ['প', 'ৌ', 'ঁ', 'ছ', 'ে']
+
+# Example 3:
+(a) 'সংস্কৄতি' == (b) 'সংস্কৃতি' → False
+    (a) breaks as: ['স', 'ং', 'স', '্', 'ক', 'ৄ', 'ত', 'ি']
+    (b) breaks as: ['স', 'ং', 'স', '্', 'ক', 'ৃ', 'ত', 'ি']
+```
+
+### Nukta normalization
+```
+# Example 1:
+(a) 'কেন্দ্রীয়' == (b) 'কেন্দ্রীয়' → False
+    (a) breaks as: ['ক', 'ে', 'ন', '্', 'দ', '্', 'র', 'ী', 'য', '়']
+    (b) breaks as: ['ক', 'ে', 'ন', '্', 'দ', '্', 'র', 'ী', 'য়']
+
+# Example 2:
+(a) 'জ়ন্য' == (b) 'জন্য' → False
+    (a) breaks as: ['জ', '়', 'ন', '্', 'য']
+    (b) breaks as: ['জ', 'ন', '্', 'য']
+```
+
+### Invalid hosonto (connector)
+```
+# Example 1:
+(a) 'দুই্টি' == (b) 'দুইটি' → False
+    (a) breaks as: ['দ', 'ু', 'ই', '্', 'ট', 'ি']
+    (b) breaks as: ['দ', 'ু', 'ই', 'ট', 'ি']
+
+# Example 2:
+(a) 'যু্ক্ত' == (b) 'যুক্ত' → False
+    (a) breaks as: ['য', 'ু', '্', 'ক', '্', 'ত']
+    (b) breaks as: ['য', 'ু', 'ক', '্', 'ত']
+```
+
+### To+hosonto conversion
+```
+# Example 1:
+(a) 'বুত্পত্তি' == (b) 'বুৎপত্তি' → False
+    (a) breaks as: ['ব', 'ু', 'ত', '্', 'প', 'ত', '্', 'ত', 'ি']
+    (b) breaks as: ['ব', 'ু', 'ৎ', 'প', 'ত', '্', 'ত', 'ি']
+
+# Example 2:
+(a) 'উত্স' == (b) 'উৎস' → False
+    (a) breaks as: ['উ', 'ত', '্', 'স']
+    (b) breaks as: ['উ', 'ৎ', 'স']
+```
+
+### Duplicate diacritics
+```
+# Example 1:
+(a) 'যুুদ্ধ' == (b) 'যুদ্ধ' → False
+    (a) breaks as: ['য', 'ু', 'ু', 'দ', '্', 'ধ']
+    (b) breaks as: ['য', 'ু', 'দ', '্', 'ধ']
+
+# Example 2:
+(a) 'প্রকৃৃতির' == (b) 'প্রকৃতির' → False
+    (a) breaks as: ['প', '্', 'র', 'ক', 'ৃ', 'ৃ', 'ত', 'ি', 'র']
+    (b) breaks as: ['প', '্', 'র', 'ক', 'ৃ', 'ত', 'ি', 'র']
+```
+
+### Vowel diacritics after vowels
+```
+# Example 1:
+(a) 'উুলু' == (b) 'উলু' → False
+    (a) breaks as: ['উ', 'ু', 'ল', 'ু']
+    (b) breaks as: ['উ', 'ল', 'ু']
+
+# Example 2:
+(a) 'একএে' == (b) 'একত্রে' → False
+    (a) breaks as: ['এ', 'ক', 'এ', 'ে']
+    (b) breaks as: ['এ', 'ক', 'ত', '্', 'র', 'ে']
+```
+
+### Repeated folas
+```
+(a) 'গ্র্রামকে' == (b) 'গ্রামকে' → False
+    (a) breaks as: ['গ', '্', 'র', '্', 'র', 'া', 'ম', 'ক', 'ে']
+    (b) breaks as: ['গ', '্', 'র', 'া', 'ম', 'ক', 'ে']
+```
+
+---
+
+## Operations Pipeline
+
+The normalizer applies operations in this fixed order:
+
+**Word-level ops** (operate on the full word string):
+1. `LegacySymbols` — map legacy symbols via `legacy_maps`
+2. `BrokenDiacritics` — fix broken diacritic sequences
+3. `AssameseReplacement` — ৰ→র, ৱ→ব
+4. `PunctuationReplacement` — curly quotes, dashes, etc.
+
+**Decomposition-level ops** (operate on individual character positions):
+5. `BrokenNukta` — compose nukta with preceding consonant
+6. `InvalidUnicode` — remove invalid starts/ends/chars
+7. `InvalidConnector` — remove misplaced hosonto
+8. `FixDiacritics` — vowel/consonant diacritic cleanup + reordering
+9. `VowelDiacriticAfterVowel` — special Bangla override (এ→ত্র)
+10. `base_bangla_compose` — re-run cleanup after structural changes
+11. `ToAndHosontoNormalize` — ত্ → ৎ conversion
+12. `NormalizeConjunctsDiacritics` — fix repeated folas, jo-fola typos
+13. `ComplexRootNormalization` — validate conjunct formations
+
+> **Note:** The normalization is purely based on how Bangla text is used in
 > **Bangladesh** (bn:BD). It does not necessarily cover every variation
 > of textual content from other regions.
+
+---
 
 ## Relationship to upstream
 
@@ -227,26 +383,29 @@ If you use this in academic work, please cite the original library:
 }
 ```
 
+---
+
 ## Project structure
 
 ```
 src/
 ├── lib.rs              — crate root, public API
-├── langs.rs            — Bangla Unicode data tables (vowels, consonants,
-│                         diacritics, conjuncts, normalization maps)
+├── langs.rs            — Bangla Unicode data tables
 ├── python.rs           — PyO3 bindings for Python interop
 ├── word/
 │   ├── mod.rs          — word-level normalize() entry point + pipeline
 │   └── ops.rs          — individual normalization operations
 └── sentence/
     ├── mod.rs          — sentence-level normalize() + NoneTokenPolicy
-    └── tokenizer.rs    — character-level tokenizer (Bangla/English/emoji/etc.)
+    └── tokenizer.rs    — character-level tokenizer
 
+bnUnicodeNormalizer-src/ — upstream Python source snapshot (for oracle generation)
 benches/                — criterion benchmarks
-references/             — upstream Python source snapshot (for oracle generation)
-tests/                  — oracle validation (50,008 words, 100% match)
-THIRD_PARTY_NOTICES.md  — upstream license + attribution
-LICENSE                 — this project's MIT license
+tests/
+├── validate_oracle.rs  — Rust integration test
+├── data/               — oracle datasets + corpus sample
+└── scripts/            — Python oracle generation + fuzz testing
+docs/                   — DIVERGENCES.md (porting log)
 ```
 
 ## Running tests
@@ -257,6 +416,9 @@ cargo test
 
 # Benchmark
 cargo bench
+
+# Fuzz stress test (requires Python venv with bnunicodenormalizer)
+python tests/scripts/fuzz_stress.py
 ```
 
 ## License
